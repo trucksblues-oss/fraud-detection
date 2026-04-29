@@ -28,6 +28,8 @@ def score_transactions(transactions: pd.DataFrame, accounts: pd.DataFrame) -> pd
 
 
 def summarize_results(scored: pd.DataFrame, chargebacks: pd.DataFrame) -> pd.DataFrame:
+    risk_order = pd.CategoricalDtype(["low", "medium", "high"], ordered=True)
+
     summary = (
         scored.groupby("risk_label", as_index=False)
         .agg(
@@ -35,16 +37,20 @@ def summarize_results(scored: pd.DataFrame, chargebacks: pd.DataFrame) -> pd.Dat
             total_amount_usd=("amount_usd", "sum"),
             avg_amount_usd=("amount_usd", "mean"),
         )
-        .sort_values("risk_label")
     )
+    summary["risk_label"] = summary["risk_label"].astype(risk_order)
+    summary = summary.sort_values("risk_label")
 
-    known_fraud = scored.merge(chargebacks[["transaction_id"]], on="transaction_id", how="left", indicator=True)
+    cb = chargebacks[["transaction_id", "loss_amount_usd"]].drop_duplicates("transaction_id")
+    known_fraud = scored.merge(cb, on="transaction_id", how="left", indicator=True)
     known_fraud["is_chargeback"] = (known_fraud["_merge"] == "both").astype(int)
+    known_fraud["confirmed_loss_usd"] = known_fraud["loss_amount_usd"].fillna(0)
 
     fraud_by_label = (
         known_fraud.groupby("risk_label", as_index=False)
         .agg(
-            chargebacks=("is_chargeback", "sum")
+            chargebacks=("is_chargeback", "sum"),
+            confirmed_loss_usd=("confirmed_loss_usd", "sum"),
         )
     )
 
